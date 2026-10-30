@@ -1,0 +1,37 @@
+type,part,community_id,community_label,models,format,file
+ergm,ergm,406,A,m14a; m14c; m14d,html,outputs/tables_paper/ergm_ergm_community_406.html
+ergm,ergm,406,A,m14a; m14c; m14d,rtf,outputs/tables_paper/ergm_ergm_community_406.rtf
+ergm,ergm,406,A,m14a; m14c; m14d,csv,outputs/tables_paper/ergm_ergm_community_406.csv
+ergm,ergm,408,B,m14a; m14c; m14d,html,outputs/tables_paper/ergm_ergm_community_408.html
+ergm,ergm,408,B,m14a; m14c; m14d,rtf,outputs/tables_paper/ergm_ergm_community_408.rtf
+ergm,ergm,408,B,m14a; m14c; m14d,csv,outputs/tables_paper/ergm_ergm_community_408.csv
+ergm,ergm,428,C,m14a; m14c; m14d,html,outputs/tables_paper/ergm_ergm_community_428.html
+ergm,ergm,428,C,m14a; m14c; m14d,rtf,outputs/tables_paper/ergm_ergm_community_428.rtf
+ergm,ergm,428,C,m14a; m14c; m14d,csv,outputs/tables_paper/ergm_ergm_community_428.csv
+ergm,ergm,477,D,m14a; m14c; m14d,html,outputs/tables_paper/ergm_ergm_community_477.html
+ergm,ergm,477,D,m14a; m14c; m14d,rtf,outputs/tables_paper/ergm_ergm_community_477.rtf
+ergm,ergm,477,D,m14a; m14c; m14d,csv,outputs/tables_paper/ergm_ergm_community_477.csv
+stergm,formation,406,A,m7f1d1; m7f2d2; m7f3d3; m7f4d3,html,outputs/tables_paper/stergm_formation_community_406.html
+stergm,formation,406,A,m7f1d1; m7f2d2; m7f3d3; m7f4d3,rtf,outputs/tables_paper/stergm_formation_community_406.rtf
+stergm,formation,406,A,m7f1d1; m7f2d2; m7f3d3; m7f4d3,csv,outputs/tables_paper/stergm_formation_community_406.csv
+stergm,formation,408,B,m7f1d1; m7f2d2; m7f3d3; m7f4d3,html,outputs/tables_paper/stergm_formation_community_408.html
+stergm,formation,408,B,m7f1d1; m7f2d2; m7f3d3; m7f4d3,rtf,outputs/tables_paper/stergm_formation_community_408.rtf
+stergm,formation,408,B,m7f1d1; m7f2d2; m7f3d3; m7f4d3,csv,outputs/tables_paper/stergm_formation_community_408.csv
+stergm,formation,428,C,m7f1d1; m7f2d2; m7f3d3; m7f4d3,html,outputs/tables_paper/stergm_formation_community_428.html
+stergm,formation,428,C,m7f1d1; m7f2d2; m7f3d3; m7f4d3,rtf,outputs/tables_paper/stergm_formation_community_428.rtf
+stergm,formation,428,C,m7f1d1; m7f2d2; m7f3d3; m7f4d3,csv,outputs/tables_paper/stergm_formation_community_428.csv
+stergm,formation,477,D,m7f1d1; m7f2d2; m7f3d3; m7f4d3,html,outputs/tables_paper/stergm_formation_community_477.html
+stergm,formation,477,D,m7f1d1; m7f2d2; m7f3d3; m7f4d3,rtf,outputs/tables_paper/stergm_formation_community_477.rtf
+stergm,formation,477,D,m7f1d1; m7f2d2; m7f3d3; m7f4d3,csv,outputs/tables_paper/stergm_formation_community_477.csv
+stergm,dissolution,406,A,m7f1d1; m7f2d2; m7f3d3; m7f4d3,html,outputs/tables_paper/stergm_dissolution_community_406.html
+stergm,dissolution,406,A,m7f1d1; m7f2d2; m7f3d3; m7f4d3,rtf,outputs/tables_paper/stergm_dissolution_community_406.rtf
+stergm,dissolution,406,A,m7f1d1; m7f2d2; m7f3d3; m7f4d3,csv,outputs/tables_paper/stergm_dissolution_community_406.csv
+stergm,dissolution,408,B,m7f1d1; m7f2d2; m7f3d3; m7f4d3,html,outputs/tables_paper/stergm_dissolution_community_408.html
+stergm,dissolution,408,B,m7f1d1; m7f2d2; m7f3d3; m7f4d3,rtf,outputs/tables_paper/stergm_dissolution_community_408.rtf
+stergm,dissolution,408,B,m7f1d1; m7f2d2; m7f3d3; m7f4d3,csv,outputs/tables_paper/stergm_dissolution_community_408.csv
+stergm,dissolution,428,C,m7f1d1; m7f2d2; m7f3d3; m7f4d3,html,outputs/tables_paper/stergm_dissolution_community_428.html
+stergm,dissolution,428,C,m7f1d1; m7f2d2; m7f3d3; m7f4d3,rtf,outputs/tables_paper/stergm_dissolution_community_428.rtf
+stergm,dissolution,428,C,m7f1d1; m7f2d2; m7f3d3; m7f4d3,csv,outputs/tables_paper/stergm_dissolution_community_428.csv
+stergm,dissolution,477,D,m7f1d1; m7f2d2; m7f3d3; m7f4d3,html,outputs/tables_paper/stergm_dissolution_community_477.html
+stergm,dissolution,477,D,m7f1d1; m7f2d2; m7f3d3; m7f4d3,rtf,outputs/tables_paper/stergm_dissolution_community_477.rtf
+stergm,dissolution,477,D,m7f1d1; m7f2d2; m7f3d3; m7f4d3,csv,outputs/tables_paper/stergm_dissolution_community_477.csv

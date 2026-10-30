@@ -1,0 +1,25 @@
+cff-version: 1.2.0
+type: software
+title: "Add Health ERGM Analysis: Supplemental materials for suicidal ideation and adolescent friendship networks"
+message: >-
+  If you use this analysis code or these supplemental results, please cite
+  this repository. The associated manuscript is "Populations to Social
+  Networks: Identifying structural effects of suicidal ideation on adolescent
+  friendship networks".
+authors:
+  - family-names: McDonnell Maayan
+    given-names: Gabe
+    orcid: "https://orcid.org/0000-0001-5725-7622"
+  - family-names: Gondal
+    given-names: Neha
+    orcid: "https://orcid.org/0000-0001-7337-9072"
+repository-code: "https://github.com/gabemgem/Add-Health-ERGM-Analysis"
+url: "https://github.com/gabemgem/Add-Health-ERGM-Analysis"
+abstract: >-
+  Reproducible R analysis code and supplemental results accompanying research
+  on suicidal ideation and adolescent friendship networks in the National
+  Longitudinal Study of Adolescent to Adult Health (Add Health). Includes
+  directed exponential random graph models (ERGMs), separable temporal ERGMs
+  of friendship formation and persistence between Waves I and II, community
+  descriptives, model diagnostics, and exploratory pooling and sensitivity
+  analyses. Restricted-use respondent-level data are not included.

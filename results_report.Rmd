@@ -1,0 +1,974 @@
+---
+title: "Suicidal ideation and adolescent friendship networks — Supplement"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 2
+    theme: flatly
+    highlight: kate
+    code_folding: none
+---
+
+```{r setup, include=FALSE}
+source("utils/project_setup.R")
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE,
+                      fig.width = 10, fig.height = 7, dpi = 120)
+
+# ==============================================================================
+# CONFIG
+# ==============================================================================
+# Folder holding one result bundle, relative to the supplement root.
+# The runner selects reference_results or results/report_bundle explicitly.
+RESULTS_ROOT <- Sys.getenv("SUPPLEMENT_RESULTS_ROOT", "reference_results")
+
+# Pooling choices. Pooling is recomputed here from the per-community
+# estimates, so these can be changed and the report re-knitted without
+# rerunning any models.
+EXCLUDE_SMALL  <- TRUE   # primary meta-analysis excludes small communities (n < 50)
+CORR_THRESHOLD <- 0.7    # |r| at or above this flags a coefficient pair as collinear
+GOF_P          <- 0.05   # GOF categories with MC p-value below this count as poorly fit
+# Per-community GOF plots to embed in the "By Community" view (one image per
+# community and model, so they add size): "last" = the last model listed in
+# each config file, NULL = none, or model ids.
+GOF_IMAGE_MODELS <- "last"
+
+# Communities you report in full: listed first in the "By Community" dropdown
+# and ringed in the paper figures. Either ids, labelled "A", "B", "C" in order
+# (c("12", "45", "67")), or ids named with the label to print
+# (c("12" = "A", "45" = "B", "67" = "C")). Print pseudonyms, not school ids.
+FEATURED_COMMUNITIES <- c("406"="406", "408"="408", "428"="428", "477"="477")
+
+# Paper figures: one caterpillar plot (per-community estimates with 95% CIs,
+# one panel per term) per entry. model = a model id or "last" (the last model
+# in the config file that has this part); terms = NULL for all terms, or raw
+# term names (listed under each figure) to choose and order the panels.
+# An entry may also set `featured` (same format as FEATURED_COMMUNITIES) to
+# highlight different communities in that figure. paper_figures.R makes the
+# same figures without knitting this report.
+PAPER_FIGURES <- list(
+  list(type = "ergm",   model = "last", part = "ergm",        terms = NULL),
+  list(type = "stergm", model = "m7f3d3", part = "formation",   terms = NULL),
+  list(type = "stergm", model = "m7f3d3", part = "dissolution", terms = NULL),
+  list(type = "stergm", model = "m7f4d3", part = "formation",   terms = NULL),
+  list(type = "stergm", model = "m7f4d3", part = "dissolution", terms = NULL)
+)
+PAPER_FIG_DIR   <- "outputs/figures_paper"   # PDF (vector) and 300-dpi PNG copies are saved here
+PAPER_FIG_WIDTH <- 7                 # inches; height grows with the number of panels
+PAPER_FIG_NCOL  <- 3                 # panels per row
+SHOW_POOLED_IN_FIGURES <- FALSE      # TRUE adds the pooled estimate as a solid vertical line
+# Row order, one set of figures per entry: "estimate" (each panel sorted by its
+# own estimates) and/or "community" (rows sorted by community id, the same in
+# every panel; files end in "_by_id").
+PAPER_FIG_ORDERS <- c("estimate", "community")
+# Print community ids beside the rows in the "community" set. They are school
+# ids, so keep FALSE for figures that go in the paper.
+PAPER_FIG_ROW_LABELS <- FALSE
+
+# Editable Word tables (RTF), standalone HTML, and CSV copies. Nonblank
+# paper_name entries in config select/name columns independently of the report.
+EXPORT_PAPER_TABLES <- TRUE
+PAPER_TABLE_DIR <- "outputs/tables_paper"
+PAPER_TABLE_COMMUNITIES <- c("406" = "A", "408" = "B", "428" = "C", "477" = "D")
+PAPER_TABLE_DIGITS <- 2
+# ==============================================================================
+
+suppressPackageStartupMessages({
+  library(tidyverse)
+  library(knitr)
+  library(kableExtra)
+  library(scales)
+})
+source("utils/meta_trust.R")
+source("utils/report_helpers.R")
+source("utils/model_pipeline.R")   # model CSV readers only; nothing is fitted here
+source("utils/structure_helpers.R")  # triad type labels
+source("utils/paper_table_helpers.R")
+
+idx <- result_index(RESULTS_ROOT)
+img_idx <- list.files(RESULTS_ROOT, pattern = "\\.png$", recursive = TRUE, full.names = TRUE)
+rr <- function(name) read_result(idx, name)
+
+ergm_defs <- read_ergm_models("config/ergm_model_desc.csv") |> filter(show_in_report)
+stergm_defs <- read_stergm_models("config/stergm_model_desc.csv") |> filter(show_in_report)
+
+covariates <- rr("community_covariates.csv")
+desc_all <- rr("all_communities_descriptives_network_directed_full.csv")
+
+# Load one model type's results, keep only models listed in the CSV, and
+# re-pool with the settings above.
+load_type <- function(type, defs) {
+  out <- list(run = rr(paste0(type, "_models_run.csv")), info = rr(paste0(type, "_fit_info.csv")),
+              coefs = rr(paste0(type, "_coefs.csv")), gof = rr(paste0(type, "_gof.csv")),
+              corr = rr(paste0(type, "_coef_corr.csv")))
+  for (k in c("info", "coefs", "gof", "corr")) {
+    out[[k]] <- if (is.null(out[[k]]) || nrow(out[[k]]) == 0) NULL else filter(out[[k]], model_id %in% defs$model_id)
+  }
+  out$meta <- if (!is.null(out$coefs) && !is.null(covariates)) meta_analyze(out$coefs, covariates, EXCLUDE_SMALL) else tibble()
+  out$meta_reg <- if (!is.null(out$coefs) && !is.null(covariates))
+    meta_regression(out$coefs, covariates, setNames(defs$moderators, defs$model_id), EXCLUDE_SMALL) else tibble()
+  out$selection <- if (!is.null(out$info) && !is.null(covariates)) selection_check(out$info, covariates, EXCLUDE_SMALL) else tibble()
+  out
+}
+E <- load_type("ergm", ergm_defs)
+S <- load_type("stergm", stergm_defs)
+
+E$int_coefs <- NULL
+
+n_comm <- if (!is.null(covariates)) nrow(covariates) else NA_integer_
+E$trust <- if (nrow(E$meta)) assess_trust(E$meta, n_comm, E$int_coefs) else tibble()
+S$trust <- if (nrow(S$meta)) assess_trust(S$meta, n_comm) else tibble()
+
+ergm_labels <- setNames(ergm_defs$label, ergm_defs$model_id)
+stergm_labels <- setNames(stergm_defs$label, stergm_defs$model_id)
+
+# Status of each model's results relative to the current CSV definition.
+result_status <- function(defs, run, fields) {
+  vapply(seq_len(nrow(defs)), function(i) {
+    if (is.null(run) || !defs$model_id[i] %in% run$model_id) return("not run yet")
+    r <- run[run$model_id == defs$model_id[i], ][1, ]
+    same <- all(vapply(fields, function(f) identical(coalesce(as.character(r[[f]]), ""),
+                                                      coalesce(as.character(defs[[f]][i]), "")), logical(1)))
+    paste0(if (same) "current" else "definition changed since run", " (", r$run_at, ")")
+  }, character(1))
+}
+
+# Formation / dissolution model ids in CSV order.
+stergm_ids <- function(part) stergm_defs$model_id[stergm_defs$part %in% c(part, "both")]
+```
+
+```{r assets}
+toggle_assets()
+community_view_assets()
+```
+
+```{r section-builders}
+# ------------------------------------------------------------------------------
+# Section builders shared by the ERGM and STERGM sections. `R` is E or S,
+# `group` the checkbox group, `part` "ergm" / "formation" / "dissolution".
+# ------------------------------------------------------------------------------
+term_levels <- function(R, part_name) {
+  if (is.null(R$coefs)) return(character(0))
+  unique(R$coefs$term[R$coefs$part == part_name])
+}
+
+pooled_table <- function(R, group, ids, labels, part_name, caption) {
+  meta <- filter(R$meta, part == part_name)
+  info <- if (is.null(R$info)) tibble() else filter(R$info, part == part_name)
+  small_ids <- covariates$community_id[covariates$small_community %in% TRUE]
+  footer <- info |>
+    group_by(model_id) |>
+    summarise(`Communities fit` = sum(status == "fit"),
+              `  of which small, not pooled` = if (EXCLUDE_SMALL) sum(status == "fit" & community_id %in% small_ids) else 0L,
+              `Failed / degenerate / timed out` = sum(!status %in% c("fit", "too small", "too few events")),
+              `Too small / too few events` = sum(status %in% c("too small", "too few events")),
+              `With terms dropped` = sum(!is.na(terms_dropped) & nzchar(terms_dropped)), .groups = "drop") |>
+    mutate(across(-model_id, as.character)) |>
+    pivot_longer(-model_id, names_to = "row", values_to = "value")
+  HTML(column_table(pooled_cells(meta), group, ids, labels[ids], footer, caption, term_levels(R, part_name)))
+}
+
+trust_table <- function(R, group, ids, labels, part_name, caption) {
+  t <- filter(R$trust, part == part_name)
+  if (nrow(t) == 0) return(HTML("<p><em>No pooled estimates.</em></p>"))
+  footer <- t |> group_by(model_id) |>
+    summarise(ok = sum(verdict == "ok"), caution = sum(verdict == "caution"), poor = sum(verdict == "poor"), .groups = "drop") |>
+    pivot_longer(-model_id, names_to = "row", values_to = "value") |>
+    mutate(row = paste("Terms rated", row), value = as.character(value))
+  HTML(column_table(trust_cells(t), group, ids, labels[ids], footer, caption, term_levels(R, part_name)))
+}
+
+trust_details <- function(R, ids, labels, part_name, heading_level = "###") {
+  for (id in ids) {
+    t <- filter(R$trust, model_id == id, part == part_name)
+    cat("\n\n", heading_level, " ", labels[[id]], "\n\n", sep = "")
+    if (nrow(t) == 0) { cat("No pooled estimates.\n\n"); next }
+    cat("Each point is one community's estimate with its 95% CI (open circles: small communities, n < 50). The blue line is the pooled estimate; the dark band its 95% CI and the light band the 95% prediction interval.\n\n")
+    print(forest_plot(filter(R$coefs, model_id == id, part == part_name) |>
+                        left_join(select(covariates, community_id, small_community), by = "community_id"),
+                      filter(R$meta, model_id == id, part == part_name)))
+    cat("\n\n")
+    t |> transmute(Term = clean_term(term), k, Coverage = percent(coverage, 1), `I² (%)` = fmt_num(I2, 0),
+                   `Q p` = fmt_p(Q_p), `T² p` = fmt_p(T2_p),
+                   `LOO shift (SE)` = fmt_num(loo_max_shift_se, 2), `Most influential` = loo_most_influential,
+                   `Small-comm. shift` = fmt_num(small_shift_se, 2), `Attrition shift` = fmt_num(attrition_shift_se, 2),
+                   `SE>5 shift` = fmt_num(strict_shift_se, 2), `Size p` = fmt_num(size_slope_p, 3),
+                   `Integrated z` = fmt_num(integrated_z, 2), `AIC FE / RE` = paste(fmt_num(aic_fe, 0), "/", fmt_num(aic_re, 0)),
+                   Verdict = verdict) |>
+      kable_styled(font_size = 12) |> print()
+    fails <- filter(R$info, model_id == id, part == part_name, !status %in% c("fit"))
+    if (nrow(fails) > 0) {
+      cat("\n\n<details><summary>Communities not pooled (", nrow(fails), ")</summary>\n\n", sep = "")
+      fails |> mutate(n = as.numeric(community_id)) |> arrange(n) |>
+        transmute(Community = community_id, Nodes = n_nodes, Status = status,
+                  Reason = coalesce(problem, error, ""), Method = coalesce(method, "")) |>
+        kable_styled(font_size = 12) |> print()
+      cat("\n\n</details>\n\n")
+    }
+  }
+}
+
+checks_text <- function() {
+  trust_checks |> transmute(Check = reason, `Flag when` = rule) |> kable_styled(full_width = TRUE)
+}
+
+fit_status_table <- function(R, caption) {
+  if (is.null(R$info)) return(invisible(NULL))
+  R$info |> count(Model = model_id, Part = part, Status = status) |>
+    pivot_wider(names_from = Status, values_from = n, values_fill = 0) |>
+    kable_styled(caption = caption)
+}
+
+gof_summary_table <- function(R, caption) {
+  if (is.null(R$gof) || nrow(R$gof) == 0) return(cat("*No goodness-of-fit results.*\n"))
+  R$gof |>
+    group_by(model_id, community_id, statistic) |>
+    summarise(poor = any(p.value < GOF_P, na.rm = TRUE), .groups = "drop") |>
+    group_by(Model = model_id, statistic) |>
+    summarise(share = mean(poor), n = n(), .groups = "drop") |>
+    mutate(cell = paste0(percent(share, 1), " of ", n)) |>
+    select(-share, -n) |>
+    pivot_wider(names_from = statistic, values_from = cell) |>
+    kable_styled(caption = caption) |> print()
+}
+
+corr_flags <- function(R) {
+  if (is.null(R$corr) || nrow(R$corr) == 0) return(tibble())
+  R$corr |> filter(abs(r) >= CORR_THRESHOLD)
+}
+
+# One community's model table (models as columns): estimate + stars with the SE
+# below, footer rows for status (and AIC/BIC for ERGMs). Returns HTML, or ""
+# if the community has no results for this part.
+community_table <- function(R, cid, group, ids, labels, part_name) {
+  if (is.null(R$info)) return("")
+  ci <- filter(R$info, community_id == cid, part == part_name, model_id %in% ids)
+  if (nrow(ci) == 0) return("")
+  cc <- if (is.null(R$coefs)) tibble(model_id = character(), term = character(), cell = character()) else
+    community_cells(filter(R$coefs, community_id == cid, part == part_name), se = TRUE)
+  footer <- ci |> transmute(model_id, Status = paste0(status, ifelse(!is.na(method) & status != "too small",
+                                                                      paste0(" (", ifelse(method == "MCMLE", "MCMLE", "SA"), ")"), "")),
+                            AIC = fmt_num(aic, 1), BIC = fmt_num(bic, 1)) |>
+    pivot_longer(-model_id, names_to = "row", values_to = "value")
+  if (part_name != "ergm") footer <- filter(footer, row == "Status")
+  column_table(cc, group, ids, labels[ids], footer, NULL, term_levels(R, part_name))
+}
+HTML <- htmltools::HTML
+
+# Model ids whose GOF plots are embedded (see GOF_IMAGE_MODELS).
+gof_ids <- function(defs) if (identical(GOF_IMAGE_MODELS, "last")) tail(defs$model_id, 1) else intersect(GOF_IMAGE_MODELS, defs$model_id)
+```
+
+# Overview
+
+This report covers wave 1 directed ERGMs and directed STERGMs (wave 1 → wave 2), each fit separately to every community. **By Community** shows each community's own results; **Paper Figures** summarizes every community's estimates; the numbered sections that follow describe the networks and pool the estimates across communities. Models are defined in `config/ergm_model_desc.csv` and `config/stergm_model_desc.csv`; only rows with `show_in_report = TRUE` appear. All results are read from aggregate CSV files in **`r RESULTS_ROOT`**, so no individual-level data is needed to build this report.
+
+```{r overview-counts}
+if (!is.null(covariates)) {
+  tibble(
+    Metric = c("Communities", "Respondents (wave 1 nodes)", "Wave 1 arcs (directed nominations)",
+               "Median community size", "Small communities (n < 50)", "High-attrition communities (> 30%)"),
+    Value = c(nrow(covariates), comma(sum(covariates$n_nodes)), comma(sum(covariates$n_arcs_w1)),
+              comma(median(covariates$n_nodes)), sum(covariates$small_community %in% TRUE),
+              sum(covariates$high_attrition %in% TRUE))) |>
+    kable_styled()
+}
+```
+
+```{r overview-models}
+bind_rows(
+  ergm_defs |> transmute(Type = "ERGM (wave 1)", Model = label, Description = desc,
+                         Results = result_status(ergm_defs, E$run, c("terms", "min_network_size")),
+                         Integrated = ifelse(run_integrated,
+                           ifelse(model_id %in% E$int_info$model_id,
+                                  E$int_info$status[match(model_id, E$int_info$model_id)], "not run yet"), "—")),
+  stergm_defs |> transmute(Type = paste0("STERGM (", part, ")"), Model = label, Description = desc,
+                           Results = result_status(stergm_defs, S$run, c("formation_terms", "dissolution_terms", "min_network_size")),
+                           Integrated = "—")) |>
+  kable_styled(caption = "Models in this report", full_width = TRUE)
+```
+
+<div class="note">
+**How pooled results are made (both model types).** Each model is fit separately to every community large enough to fit (default n ≥ 15 for ERGMs, n ≥ 20 for STERGMs), using stochastic approximation (Snijders 2002). Fits that fail or do not converge are excluded. So are degenerate fits: any |estimate| > 10 or SE > 10 excludes the whole ERGM or STERGM sub-model. Terms whose attribute has no usable variation in a community (e.g. no ideation cases) are dropped for that community only. For each term, the usable per-community estimates are then combined in a random-effects meta-analysis (REML, `metafor`). Each estimate is treated as the community's true value plus estimation error: precise estimates get more weight, and real between-community differences (τ²) are separated from noise. `r if (EXCLUDE_SMALL) "**Small communities (n < 50) are excluded from the primary pooled estimates** and used as a sensitivity check." else "Small communities are included in the pooled estimates."` Based on Snijders & Baerveldt (2003), An (2015) and Tolochko & Boomgaarden (2024).
+</div>
+
+---
+
+# By Community
+
+Choose a community to see its network, its ERGM and STERGM estimates side by side, and the fit diagnostics for each model. Featured communities (`FEATURED_COMMUNITIES`) are listed first. Cells show the log-odds estimate with stars (`+` p<.1, `*` p<.05, `**` p<.01, `***` p<.001) and the SE below it in parentheses. `†` = SE not estimable. `n/c` = the fit failed, did not converge or was degenerate (hover for the reason). `—` = the term is not in that model, or was dropped for this community. Dissolution tables are tergm ≥ 4 **persistence** estimates: > 0 = an arc is more likely to persist. The checkboxes in the bar choose which models are shown.
+
+**§** in the network and sample tables = too few cases to report. A community's figures for a measure are withheld when they rest on fewer than 10 people, when any category has 1 to 9 people, or when everyone falls in one category (so a prevalence of 0% or 100% is also withheld).
+
+```{r by-community, results = "asis"}
+community_list <- unique(c(covariates$community_id, E$info$community_id, S$info$community_id))
+community_list <- community_list[order(suppressWarnings(as.numeric(community_list)), community_list)]
+feat_labels <- featured_labels(FEATURED_COMMUNITIES)
+featured <- intersect(names(feat_labels), community_list)
+
+cov_of <- function(cid) if (is.null(covariates)) NULL else covariates[covariates$community_id == cid, ][1, ]
+flags_of <- function(cid) {
+  cv <- cov_of(cid)
+  c(if (isTRUE(cv$small_community)) "small community (n < 50)", if (isTRUE(cv$high_attrition)) "high attrition (> 30%)")
+}
+size_of <- function(cid) { cv <- cov_of(cid); if (is.null(cv) || is.na(cv$n_nodes)) "?" else cv$n_nodes }
+sel_labels <- setNames(vapply(community_list, function(cid) {
+  fl <- flags_of(cid)
+  sprintf("Community %s (n = %s)%s%s", cid, size_of(cid),
+          if (cid %in% featured) paste0(" — featured ", feat_labels[[cid]]) else "",
+          if (length(fl)) paste0(" [", paste(fl, collapse = "; "), "]") else "")
+}, character(1)), community_list)
+
+# Network statistics by wave (02_descriptives.R).
+desc_html <- function(cid) {
+  if (is.null(desc_all)) return("")
+  d <- filter(desc_all, community_id == cid) |> arrange(wave)
+  if (nrow(d) == 0) return("")
+  tbl <- tryCatch(d |> transmute(
+    Wave = wave, Nodes = fmt_disc(n_nodes), Arcs = fmt_disc(n_edges_arcs), Density = fmt_disc(density, 3),
+    `Avg degree` = fmt_disc(avg_degree, 2), Reciprocity = fmt_disc(reciprocity, 3), Clustering = fmt_disc(clustering, 3),
+    Components = fmt_disc(n_components), Isolates = fmt_disc(n_isolates), `Largest component` = fmt_disc(largest_component)) |>
+      kable_styled(font_size = 12) |> as.character(), error = function(e) "")
+  ev <- if (is.null(S$info)) NULL else S$info |> filter(community_id == cid, !is.na(n_formed)) |> slice(1)
+  events <- if (!is.null(ev) && nrow(ev)) sprintf("Between waves: %s arcs formed, %s dissolved (people present at both waves).",
+                                                   ev$n_formed, ev$n_dissolved) else ""
+  paste0(tbl, if (nzchar(events)) paste0("<p class='community-events'>", htmltools::htmlEscape(events), "</p>"))
+}
+
+# Plain in/out-degree histogram for one community (02b_network_structure.R);
+# a plain histogram with nothing beside it is exempt from the small-cell rules.
+deg_all <- rr("desc_degree_distribution.csv")
+degree_html <- function(cid) {
+  if (is.null(deg_all)) return("")
+  d <- filter(deg_all, community_id == cid)
+  if (nrow(d) == 0) return("")
+  f <- tempfile(fileext = ".png")
+  ggsave(f, degree_plot(d, base_size = 10), width = 7, height = 4, dpi = 100, bg = "white")
+  sprintf('<img src="%s" style="width:100%%;max-width:760px;">', knitr::image_uri(f))
+}
+
+# Sample composition (one row per community in the descriptives file).
+# Each line: label, wave 1 column, wave 2 column (NA = one value), format.
+sample_spec <- tribble(
+  ~section,           ~label,                                   ~w1,                          ~w2,                          ~fmt,
+  "Demographics",     "Female",                                 "female_share",               NA,                           "pct",
+  "Demographics",     "Age, mean (SD)",                         "age_mean",                   NA,                           "msd",
+  "Demographics",     "Grade composition",                      "grade",                      NA,                           "grade",
+  "Demographics",     "Race/ethnicity (Hispanic first)",        "race",                       NA,                           "race",
+  "Demographics",     "Race/ethnicity heterogeneity (0-1)",     "race_heterogeneity",         NA,                           "num2",
+  "SES",              "Parental education, mean (1-9)",         "par_edu_w1_mean",            NA,                           "msd",
+  "SES",              "Parent on welfare",                      "welfare_share_w1",           NA,                           "pct",
+  "Suicide-related",  "Suicidal ideation",                      "ideation_prev_w1",           "ideation_prev_w2",           "pct",
+  "Suicide-related",  "Ideation onset (W1 non-ideators)",       NA,                           "ideation_onset_rate",        "pct",
+  "Suicide-related",  "Ideation remission (W1 ideators)",       NA,                           "ideation_remission_rate",    "pct",
+  "Suicide-related",  "Suicide attempt",                        "attempt_prev_w1",            "attempt_prev_w2",            "pct",
+  "Suicide-related",  "Any suicide exposure",                   "any_exposure_prev_w1",       "any_exposure_prev_w2",       "pct",
+  "Suicide-related",  "Peer suicide death exposure",            "peer_death_exposure_prev_w1", "peer_death_exposure_prev_w2", "pct",
+  "Psychosocial",     "CES-D, mean (SD)",                       "cesd_w1_mean",               "cesd_w2_mean",               "msd",
+  "Psychosocial",     "Hopelessness, mean (0-3)",               "hopelessness_w1_mean",       "hopelessness_w2_mean",       "num2",
+  "Psychosocial",     "Loneliness, mean (0-3)",                 "loneliness_w1_mean",         "loneliness_w2_mean",         "num2",
+  "Psychosocial",     "Social support, mean",                   "social_support_w1_mean",     "social_support_w2_mean",     "num2",
+  "Psychosocial",     "Any substance use",                      "substance_use_prev_w1",      "substance_use_prev_w2",      "pct",
+  "Data quality",     "Lost to follow-up at wave 2",            NA,                           "wave2_attrition",            "pct",
+  "Data quality",     "CES-D missing",                          "cesd_missing_w1",            NA,                           "pct",
+  "Data quality",     "Social support missing",                 "social_support_missing_w1",  NA,                           "pct",
+  "Data quality",     "Race/ethnicity missing",                 "race_missing",               NA,                           "pct",
+  "Data quality",     "Grade missing",                          "grade_missing",              NA,                           "pct",
+  "Data quality",     "No in-school club data",                 "club_data_missing",          NA,                           "pct",
+  "Data quality",     "In at least one club (with club data)",  "club_any_share",             NA,                           "pct",
+  "Data quality",     "Clubs per student, mean",                "clubs_mean",                 NA,                           "num2"
+)
+race_cols <- c(White = "race_white", Black = "race_black", Hispanic = "race_hispanic", `Asian/PI` = "race_asian_pi",
+               `American Indian` = "race_american_indian", Other = "race_other")
+grade_cols <- setNames(paste0("grade_", 7:12), paste("Grade", 7:12))
+
+# Share list such as "White 52.0%, Black 30.1%"; the symbol if suppressed.
+composition_text <- function(row, cols) {
+  if (!all(cols %in% names(row))) return("—")
+  v <- unlist(row[cols])
+  if (any(is_suppressed(v))) return(SUPPRESSED_SYMBOL)
+  keep <- !is.na(as_num(v)) & as_num(v) > 0
+  if (!any(keep)) return("—")
+  paste(sprintf("%s %s", names(cols)[keep], pct_disc(v[keep])), collapse = ", ")
+}
+
+sample_value <- function(row, col, fmt) {
+  if (is.na(col)) return("")
+  if (fmt == "race") return(composition_text(row, race_cols))
+  if (fmt == "grade") return(composition_text(row, grade_cols))
+  if (!col %in% names(row)) return("—")
+  v <- row[[col]]
+  switch(fmt,
+         pct  = pct_disc(v),
+         int  = fmt_disc(v),
+         num2 = fmt_disc(v, 2),
+         msd  = { s <- row[[sub("_mean$", "_sd", col)]]
+                  if (is_suppressed(v)) SUPPRESSED_SYMBOL
+                  else paste0(fmt_disc(v, 2), if (!is.null(s)) paste0(" (", fmt_disc(s, 2), ")") else "") })
+}
+
+sample_html <- function(cid) {
+  if (is.null(desc_all)) return("")
+  row <- filter(desc_all, community_id == cid) |> slice(1)
+  if (nrow(row) == 0 || !"female_share" %in% names(row)) return("")
+  body <- vapply(seq_len(nrow(sample_spec)), function(i) {
+    s <- sample_spec[i, ]
+    sprintf("<tr><td class='term'>%s</td><td>%s</td><td>%s</td></tr>", htmltools::htmlEscape(s$label),
+            htmltools::htmlEscape(sample_value(row, s$w1, s$fmt)), htmltools::htmlEscape(sample_value(row, s$w2, s$fmt)))
+  }, character(1))
+  sections <- sample_spec$section
+  body <- ifelse(c(TRUE, sections[-1] != sections[-length(sections)]),
+                 paste0(sprintf("<tr class='footer-row first-footer'><td class='term' colspan='3'><b>%s</b></td></tr>", sections), body),
+                 body)
+  paste0("<table class='model-table'><thead><tr><th>Measure</th><th>Wave 1</th><th>Wave 2</th></tr></thead><tbody>",
+         paste(body, collapse = ""), "</tbody></table>")
+}
+
+notes_html <- function(cid) {
+  r <- c(community_notes(E, cid, "c-ergm", ergm_defs$model_id, ergm_labels, CORR_THRESHOLD, GOF_P)$html,
+         community_notes(S, cid, "c-stergm", stergm_defs$model_id, stergm_labels, CORR_THRESHOLD, GOF_P)$html)
+  if (length(r) == 0) return("")
+  paste0("<h4>Fit notes</h4><table class='notes-table'><thead><tr><th>Model</th><th>Sub-model</th><th>Status</th><th>Notes</th></tr></thead><tbody>",
+         paste(r, collapse = ""), "</tbody></table>")
+}
+
+section <- function(title, body) if (nzchar(body)) paste0("<h4>", title, "</h4>", body) else ""
+first <- if (length(featured)) featured[1] else community_list[1]
+blocks <- vapply(community_list, function(cid) {
+  fl <- flags_of(cid)
+  body <- paste0(
+    sprintf("<h3>Community %s <small>(n = %s)</small>%s</h3>", htmltools::htmlEscape(cid), size_of(cid),
+            if (length(fl)) paste0(" <span class='community-flags'>", paste(fl, collapse = "; "), "</span>") else ""),
+    section("Network", desc_html(cid)),
+    section("Degree distribution (wave 2: people observed at wave 2)", degree_html(cid)),
+    section("Sample", sample_html(cid)),
+    section("Wave 1 ERGMs", community_table(E, cid, "c-ergm", ergm_defs$model_id, ergm_labels, "ergm")),
+    section("STERGM formation (wave 1 → 2)", community_table(S, cid, "c-stergm", stergm_ids("formation"), stergm_labels, "formation")),
+    section("STERGM dissolution, as persistence (> 0 = arc more likely to persist)",
+            community_table(S, cid, "c-stergm", stergm_ids("dissolution"), stergm_labels, "dissolution")),
+    notes_html(cid),
+    section("Goodness of fit", paste0(community_gof_images(img_idx, "ergm", cid, gof_ids(ergm_defs), ergm_labels),
+                                      community_gof_images(img_idx, "stergm", cid, gof_ids(stergm_defs), stergm_labels))))
+  sprintf('<div class="community-block" data-community="%s"%s>%s</div>', htmltools::htmlEscape(cid),
+          if (identical(cid, first)) "" else ' style="display:none"', body)
+}, character(1))
+
+toggles <- paste0(if (nrow(ergm_defs)) as.character(toggle_panel("c-ergm", ergm_defs$model_id, ergm_defs$label, "ERGMs:")),
+                  if (nrow(stergm_defs)) as.character(toggle_panel("c-stergm", stergm_defs$model_id, stergm_defs$label, "STERGMs:")))
+html <- paste0(community_selector(community_list, sel_labels, featured, toggles),
+               paste(blocks, collapse = ""),
+               sprintf("<script>document.getElementById('community-select').value = '%s';</script>", first))
+cat(htmltools::htmlPreserve(html))
+```
+
+---
+
+# Paper Tables
+
+Paper tables place the selected model sequence side by side for each community, separately for ERGMs, formation, and persistence. Each usable estimate is accompanied by its 95% Wald confidence interval and significance stars. In each config CSV, `paper_name` selects a model and supplies its column heading. CSV row order determines column order.
+
+RTF files open as editable tables in Word; HTML files can be viewed or printed separately, and CSV files contain the same formatted cells. Community labels and output settings are controlled by `PAPER_TABLE_COMMUNITIES` and `PAPER_TABLE_DIR` above. Unusable estimates are marked **n/e**, never presented as null results. Exporting only reads aggregate CSVs and does not refit models. The same exports can be made without knitting by running `paper_tables.R`.
+
+```{r paper-tables, results = "asis"}
+if (EXPORT_PAPER_TABLES) {
+  paper_table_files <- export_paper_tables(RESULTS_ROOT, PAPER_TABLE_DIR,
+    PAPER_TABLE_COMMUNITIES, digits = PAPER_TABLE_DIGITS)
+  if (nrow(paper_table_files)) {
+    cat("\nFiles saved in **", PAPER_TABLE_DIR, "**.\n\n", sep = "")
+    print(knitr::kable(paper_table_files |> select(type, part, community_label, format, file),
+      format = "html", col.names = c("Type", "Component", "Community", "Format", "File")))
+  } else cat("No models selected: fill in paper_name in the config CSVs.\n")
+} else cat("Paper table exports disabled in CONFIG.\n")
+```
+
+# Paper Figures
+
+One figure per entry in `PAPER_FIGURES`, in up to two sets (`PAPER_FIG_ORDERS`). Each panel is one term, and each row is one community with its 95% confidence interval. In the first set, each panel's rows are sorted by that term's estimate, so rows do not line up across panels. In the second set, rows are sorted by community ID and are the same in every panel, so a community can be followed across terms (an empty row means that term is missing or unusable for that community). **Filled blue** points have a 95% CI that excludes 0 (p < .05); **open grey** points do not. Featured communities (`FEATURED_COMMUNITIES`, or a figure's own `featured`) are ringed in orange and labelled. X axes differ by panel. Only usable fits are drawn: communities whose fit failed, did not converge or was degenerate, or whose term had no SE, are left out, and the caption gives the count. Each figure is split into parts of at most six panels, preserving term order, and every part is saved as a PDF and a 300-dpi PNG with `_part1`, `_part2`, etc. appended to its filename in the **`r PAPER_FIG_DIR`** folder next to this file.
+
+```{r paper-figures, results = "asis"}
+set_titles <- c(estimate = "Rows sorted by estimate", community = "Rows sorted by community ID")
+for (fig_order in PAPER_FIG_ORDERS) {
+cat(sprintf("\n\n## %s\n\n", set_titles[[fig_order]]))
+for (fig in PAPER_FIGURES) {
+  R <- if (fig$type == "ergm") E else S
+  pool <- if (fig$type == "ergm") ergm_defs$model_id else stergm_ids(fig$part)
+  model <- if (identical(fig$model, "last")) tail(pool, 1) else fig$model
+  labs_all <- if (fig$type == "ergm") ergm_labels else stergm_labels
+  part_title <- c(ergm = "Wave 1 ERGM", formation = "STERGM formation", dissolution = "STERGM persistence")[[fig$part]]
+  cat(sprintf("\n\n### %s: %s\n\n", part_title, if (length(model)) labs_all[[model]] else "(no model)"))
+  if (length(model) == 0 || is.null(R$coefs)) { cat("*No results for this figure.*\n\n"); next }
+  suffix <- if (fig_order == "community") "_by_id" else ""
+  filename <- if (fig$type == "ergm") paste0("ergm_", model, suffix) else
+    paste0("stergm_", model, "_", fig$part, suffix)
+  stem <- file.path(PAPER_FIG_DIR, filename)
+  r <- save_caterpillar(R$coefs, model, fig$part, stem, terms = fig$terms,
+                        featured = if (is.null(fig$featured)) feat_labels else featured_labels(fig$featured),
+                        ncol = PAPER_FIG_NCOL, width = PAPER_FIG_WIDTH,
+                        pooled = if (SHOW_POOLED_IN_FIGURES) R$meta else NULL, info = R$info,
+                        order = fig_order, row_labels = PAPER_FIG_ROW_LABELS)
+  if (is.null(r)) { cat("*No usable estimates for this model.*\n\n"); next }
+  for (j in seq_along(r$pages)) {
+    page <- r$pages[[j]]
+    cat(sprintf("\n\n**Part %d of %d**\n\n", j, length(r$pages)))
+    cat(sprintf('<img src="%s" style="width:100%%;max-width:1000px;">\n\n', knitr::image_uri(page$files[2])))
+    cat(sprintf("*%s communities shown in this part. Saved as `%s` / `%s`.*\n\n",
+                page$n_shown, basename(page$files[1]), basename(page$files[2])))
+  }
+  cat(sprintf("*Across all parts: %s communities shown of %s fit (%s too small or too few tie changes).*\n\n",
+              r$n_shown, r$n_fit, r$n_skipped))
+  cat("<details><summary>Raw term names (to choose or order panels with `terms`)</summary>\n\n",
+      paste0("`", unique(filter(R$coefs, model_id == model, part == fig$part)$term), "`", collapse = "<br>"),
+      "\n\n</details>\n\n")
+}
+}
+```
+
+---
+
+# 1. Descriptive Network Analysis {.tabset}
+
+Per community and wave: network size, density, average degree, clustering, reciprocity, component structure, and attribute summaries. **§** = too few cases to report (see the By Community note); suppressed communities are left out of the plots.
+
+## Community Summary Table
+
+```{r desc-table}
+if (!is.null(desc_all)) {
+  desc_all |>
+    select(any_of(c("community_id", "wave", "n_nodes", "n_edges_arcs", "density", "avg_degree", "clustering",
+                    "reciprocity", "n_isolates", "female_share", "ideation_prev_w1", "cesd_w1_mean",
+                    "race_white", "race_black", "race_hispanic", "race_heterogeneity", "wave2_attrition"))) |>
+    mutate(community_id = as.numeric(community_id)) |>
+    arrange(community_id, wave) |>
+    mutate(across(-c(community_id, wave), ~ fmt_disc(.x, 3))) |>
+    rename(any_of(c(Community = "community_id", Wave = "wave", `N nodes` = "n_nodes", `N arcs` = "n_edges_arcs",
+                    Density = "density", `Avg degree` = "avg_degree", Clustering = "clustering",
+                    Reciprocity = "reciprocity", Isolates = "n_isolates", `Female (share)` = "female_share",
+                    `Ideation W1` = "ideation_prev_w1", `CESD mean W1` = "cesd_w1_mean",
+                    `White (share)` = "race_white", `Black (share)` = "race_black",
+                    `Hispanic (share)` = "race_hispanic", `Race heterogeneity` = "race_heterogeneity",
+                    `Lost at W2 (share)` = "wave2_attrition"))) |>
+    kable_styled(caption = "Directed network descriptives by community and wave", full_width = TRUE, font_size = 12) |>
+    scroll_box(height = "450px")
+} else cat("Descriptives file not found.")
+```
+
+## Wave 1 → Wave 2 Change
+
+```{r desc-change, fig.height = 7}
+if (!is.null(desc_all)) {
+  desc_all |>
+    select(community_id, wave, density, reciprocity) |>
+    mutate(across(c(density, reciprocity), as_num)) |>
+    pivot_wider(names_from = wave, values_from = c(density, reciprocity), names_sep = "_w") |>
+    transmute(community_id,
+              `Density change` = ifelse(density_w1 > 0.001, (density_w2 - density_w1) / density_w1, NA_real_),
+              `Reciprocity change` = ifelse(reciprocity_w1 > 0.001, (reciprocity_w2 - reciprocity_w1) / reciprocity_w1, NA_real_)) |>
+    pivot_longer(-community_id, names_to = "metric", values_to = "pct_change") |>
+    ggplot(aes(x = reorder(factor(community_id), pct_change), y = pct_change, fill = pct_change > 0)) +
+    geom_col() + facet_wrap(~ metric, ncol = 1, scales = "free_y") + coord_flip() +
+    scale_y_continuous(labels = percent_format()) +
+    scale_fill_manual(values = c("FALSE" = "#d9534f", "TRUE" = "#5cb85c"), guide = "none") +
+    labs(x = "Community", y = "% change") + theme_minimal(base_size = 12)
+}
+```
+
+## Ideation, Exposure, CESD
+
+```{r desc-attributes, fig.height = 5}
+if (!is.null(desc_all)) {
+  desc_all |>
+    filter(wave == 1) |>
+    select(community_id, n_nodes, ideation_prev_w1, any_exposure_prev_w1) |>
+    mutate(across(-community_id, as_num)) |>
+    pivot_longer(c(ideation_prev_w1, any_exposure_prev_w1), names_to = "measure", values_to = "prev") |>
+    mutate(measure = recode(measure, ideation_prev_w1 = "Ideation prevalence", any_exposure_prev_w1 = "Any exposure prevalence")) |>
+    ggplot(aes(x = n_nodes, y = prev)) +
+    geom_point(alpha = 0.6, colour = "#2a6db0") + facet_wrap(~ measure) +
+    scale_x_log10() + scale_y_continuous(labels = percent_format()) +
+    labs(x = "Community size (n, log scale)", y = "Prevalence") + theme_minimal(base_size = 12)
+}
+```
+
+## Onset and Remission Rates
+
+```{r desc-onset, fig.height = 5}
+if (!is.null(desc_all)) {
+  desc_all |>
+    filter(wave == 1) |>
+    select(community_id, ideation_onset_rate, ideation_remission_rate) |>
+    mutate(across(-community_id, as_num)) |>
+    pivot_longer(-community_id, names_to = "outcome", values_to = "rate") |>
+    mutate(outcome = recode(outcome, ideation_onset_rate = "Onset (W1 non-ideators -> W2 ideation)",
+                            ideation_remission_rate = "Remission (W1 ideators -> W2 no ideation)")) |>
+    ggplot(aes(x = rate, fill = outcome)) +
+    geom_histogram(bins = 12, alpha = 0.8) + facet_wrap(~ outcome, scales = "free_x") +
+    scale_x_continuous(labels = percent_format()) + scale_fill_manual(values = c("#d9534f", "#5bc0de")) +
+    labs(x = "Rate", y = "Communities") + theme_minimal(base_size = 12) + theme(legend.position = "none")
+}
+```
+
+## Dyad & Triad Census
+
+```{r census-load}
+dyads <- rr("desc_dyad_census.csv")
+triads <- rr("desc_triad_census.csv")
+degrees <- rr("desc_degree_distribution.csv")
+if (is.null(triads)) cat("Run `02b_network_structure.R` to add the dyad and triad census.")
+```
+
+```{r dyad-census}
+if (!is.null(dyads)) {
+  dyads |>
+    mutate(recip = 2 * mutual / pmax(2 * mutual + asymmetric, 1)) |>
+    group_by(Wave = wave) |>
+    summarise(Communities = n(), People = comma(sum(n_nodes)), Arcs = comma(sum(n_arcs)),
+              `Mutual dyads` = comma(sum(mutual)), `Asymmetric dyads` = comma(sum(asymmetric)),
+              `Share of arcs reciprocated (pooled)` = percent(sum(2 * mutual) / sum(2 * mutual + asymmetric), 0.1),
+              `Median across communities` = percent(median(recip), 0.1), .groups = "drop") |>
+    kable_styled(caption = "Dyad census (wave 2 counts only people observed at wave 2)")
+}
+```
+
+Every set of three people falls into one of 16 directed triad types. **Expected** counts come from 100 random networks per community and wave with the same numbers of mutual, asymmetric and empty pairs (the U|MAN baseline). Departures from expected therefore reflect structure *beyond* density and reciprocity, such as closure, popularity, or hierarchy. *O/E* above 1 means the type is over-represented. *Above* is the share of communities where the observed count exceeds the expected one.
+
+```{r triad-table}
+if (!is.null(triads)) {
+  triads |>
+    group_by(wave, type) |>
+    summarise(above = mean(observed > expected + 1e-9), obs = sum(observed), exp = sum(expected), .groups = "drop") |>
+    mutate(oe = fmt_num(obs / exp, 2), above = percent(above, 1), obs = comma(obs), exp = comma(round(exp))) |>
+    pivot_wider(names_from = wave, values_from = c(obs, exp, oe, above)) |>
+    right_join(triad_types, by = "type") |>
+    arrange(match(type, triad_types$type)) |>
+    transmute(Type = type, Description = description, Class = class,
+              `W1 observed` = obs_1, `W1 expected` = exp_1, `W1 O/E` = oe_1, `W1 above` = above_1,
+              `W2 O/E` = oe_2, `W2 above` = above_2) |>
+    kable_styled(caption = "Triad census pooled over communities, vs. U|MAN expectation", full_width = TRUE, font_size = 12)
+}
+```
+
+```{r triad-oe-plot, fig.height = 5.5}
+if (!is.null(triads)) {
+  oe <- triads |> group_by(wave, type) |>
+    summarise(ratio = sum(observed) / sum(expected), .groups = "drop") |>
+    left_join(triad_types, by = "type") |>
+    mutate(type = factor(type, levels = rev(triad_types$type)))
+  ggplot(oe, aes(ratio, type, colour = class)) +
+    geom_vline(xintercept = 1, colour = "grey40") +
+    geom_segment(aes(x = 1, xend = ratio, yend = type), linewidth = 0.8) +
+    geom_point(size = 2.5) + scale_x_log10() +
+    facet_wrap(~ paste("Wave", wave)) +
+    scale_colour_manual(values = c("empty / single dyad" = "grey60", "open" = "#2a6db0",
+                                   "closed, transitive" = "#55a868", "closed, cyclic" = "#c44e52")) +
+    labs(x = "Observed / expected (log scale), pooled over communities", y = "Triad type", colour = NULL) +
+    theme_minimal(base_size = 11) + theme(legend.position = "bottom")
+}
+```
+
+```{r triad-text, results = "asis"}
+if (!is.null(triads)) {
+  r <- function(w, ty) { d <- triads[triads$wave == w & triads$type == ty, ]; sum(d$observed) / sum(d$expected) }
+  cat(sprintf(paste0("At wave 1, transitive triples (030T) occur %s times as often as expected and cyclic triples (030C) %s times; ",
+                     "in-stars (021U) occur %s times as often and out-stars (021D) %s times. ",
+                     "Transitive over-representation with cyclic under-representation points to transitive closure and a status ordering; ",
+                     "in-star over-representation points to popularity differences.\n\n"),
+              fmt_num(r(1, "030T"), 2), fmt_num(r(1, "030C"), 2), fmt_num(r(1, "021U"), 2), fmt_num(r(1, "021D"), 2)))
+}
+```
+
+**By community.** Each cell is a community's departure from its own U|MAN expectation, standardized: (observed − expected) / SD of the simulations, capped at ±10. Red = over-represented, blue = under-represented. Communities are sorted by wave 1 size (n); wave 2 counts only people observed at wave 2.
+
+```{r triad-heatmap, fig.height = 9}
+if (!is.null(triads)) {
+  size_w1 <- triads |> filter(wave == 1) |> distinct(community_id, n1 = n_nodes)
+  triads |>
+    left_join(size_w1, by = "community_id") |>
+    mutate(z = pmax(-10, pmin(10, ifelse(expected_sd > 0, (observed - expected) / expected_sd, 0))),
+           type = factor(type, levels = triad_types$type),
+           community = reorder(paste0(community_id, " (n=", n1, ")"), n1)) |>
+    ggplot(aes(type, community, fill = z)) +
+    geom_tile() +
+    scale_fill_gradient2(low = "#2166ac", mid = "white", high = "#b2182b", limits = c(-10, 10), name = "z") +
+    facet_wrap(~ paste("Wave", wave)) +
+    labs(x = "Triad type", y = NULL) +
+    theme_minimal(base_size = 9) + theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
+}
+```
+
+## Degree Distributions
+
+In-degree is how many people named someone; out-degree is how many people a respondent named, which is capped at 10 (5 male + 5 female nominations). The x-axis stops at 20; anyone above 20 is counted in the "20+" bar.
+
+```{r degree-plot, fig.height = 6}
+if (!is.null(degrees)) {
+  degree_plot(degrees, max_degree = 20, y_label = "People (all communities)")
+}
+```
+
+```{r degree-table}
+if (!is.null(degrees)) {
+  degrees |>
+    group_by(community_id, wave, direction) |>
+    summarise(mean_deg = sum(degree * n_people) / sum(n_people),
+              zero = sum(n_people[degree == 0]) / sum(n_people),
+              cap = sum(n_people[degree >= 10]) / sum(n_people), .groups = "drop") |>
+    group_by(Wave = wave, Direction = direction) |>
+    summarise(`Mean degree (median community)` = fmt_num(median(mean_deg), 2),
+              `Share with degree 0 (median)` = percent(median(zero), 0.1),
+              `Share at the cap of 10 (median)` = percent(median(cap), 0.1), .groups = "drop") |>
+    kable_styled(caption = "Degree summaries across communities")
+}
+```
+
+
+---
+
+# 2. Wave 1 Directed ERGMs {.tabset}
+
+```{r ergm-toggles}
+toggle_panel("ergm", ergm_defs$model_id, ergm_defs$label, "Show ERGM models:")
+```
+
+## Pooled Results
+
+Pooled estimates for every model, side by side. Each cell shows the pooled log-odds estimate with stars (`+` p<.1, `*` p<.05, `**` p<.01, `***` p<.001), its SE in parentheses, the **95% prediction interval** in blue, and **k**, the number of communities pooled. The prediction interval is the range expected for a new community. When it is much wider than the CI, communities genuinely differ and the average describes them less well. Use the checkboxes above to hide models.
+
+```{r ergm-pooled}
+if (nrow(E$meta)) pooled_table(E, "ergm", ergm_defs$model_id, ergm_labels, "ergm",
+                               "Pooled wave 1 ERGM estimates across communities") else cat("No ERGM results yet.")
+```
+
+```{r ergm-metareg, results = "asis"}
+if (nrow(E$meta_reg)) {
+  cat("### Do community characteristics explain the differences?\n\nFor models with `moderators` in `config/ergm_model_desc.csv`, each term's per-community estimates are regressed on community-level variables (meta-regression; An 2015). A significant moderator means the effect differs systematically with that characteristic. R² is the share of between-community variance explained.\n\n")
+  E$meta_reg |> filter(coefficient != "intrcpt") |>
+    transmute(Model = model_id, Term = clean_term(term), Moderator = coefficient, Estimate = fmt_num(estimate),
+              SE = fmt_num(std.error), p = fmt_p(p.value), `R² (%)` = fmt_num(R2, 0), k) |>
+    kable_styled() |> print()
+}
+```
+
+## Can the Pooled Results Be Trusted?
+
+Pooling is trustworthy when the pooled communities represent all communities, the estimate is stable, and the average describes communities reasonably well. Each pooled term gets the checks below. Each check is rated **ok** or **caution**, and coverage can also be **poor**. The verdict is the worst rating. Thresholds are rules of thumb, not formal tests. High heterogeneity does not make the average wrong; it means communities vary a lot around it, so read the prediction interval. Hover over a verdict for its reasons.
+
+```{r ergm-checks}
+checks_text()
+```
+
+```{r ergm-trust}
+if (nrow(E$trust)) trust_table(E, "ergm", ergm_defs$model_id, ergm_labels, "ergm", "Trust verdict for each pooled ERGM estimate")
+```
+
+```{r ergm-selection}
+if (nrow(E$selection)) {
+  E$selection |>
+    transmute(Model = model_id, `Pooled` = n_used, `Of` = n_total, `Median n (pooled)` = median_n_used,
+              `Median n (others)` = median_n_other, `Size differs p` = fmt_p(size_p),
+              `Density differs p` = fmt_p(density_p), `Ideation prev. differs p` = fmt_p(ideation_p)) |>
+    kable_styled(caption = "Do pooled communities differ from the rest? (Wilcoxon tests; low p = selection on that characteristic)")
+}
+```
+
+### Details by Model {.tabset}
+
+```{r ergm-trust-details, results = "asis", fig.height = 8}
+if (nrow(E$trust)) trust_details(E, ergm_defs$model_id, ergm_labels, "ergm", "####")
+```
+
+## Fit & Convergence
+
+```{r ergm-status}
+fit_status_table(E, "Fit status by model (communities)")
+```
+
+```{r ergm-dropped, results = "asis"}
+if (!is.null(E$info)) {
+  d <- E$info |> filter(!is.na(terms_dropped), nzchar(terms_dropped))
+  if (nrow(d)) {
+    cat("**Terms dropped in some communities** (attribute had no usable variation there; those communities do not contribute to that term's pooled estimate):\n\n")
+    d |> separate_rows(terms_dropped, sep = "; ") |> count(Model = model_id, `Term [reason]` = terms_dropped, name = "Communities") |>
+      kable_styled() |> print()
+  }
+}
+```
+
+```{r ergm-aic, results = "asis"}
+if (!is.null(E$info) && any(is.finite(E$info$aic))) {
+  aic <- E$info |> filter(status == "fit") |> select(community_id, model_id, aic) |>
+    group_by(community_id) |> mutate(best = is.finite(aic) & aic == min(aic, na.rm = TRUE)) |> ungroup()
+  cat("**AIC by community** (lower is better; green = best model for that community). Only usable fits are compared, and AIC is comparable across models only for the same community.\n\n")
+  wide <- aic |> mutate(cell = ifelse(best, cell_spec(fmt_num(aic, 1), "html", bold = TRUE, color = "#155724", background = "#d4edda"),
+                                      fmt_num(aic, 1))) |>
+    select(community_id, model_id, cell) |> pivot_wider(names_from = model_id, values_from = cell) |>
+    arrange(as.numeric(community_id))
+  wide <- wide[, c("community_id", intersect(ergm_defs$model_id, names(wide)))]
+  wide[is.na(wide)] <- "—"
+  print(kable_styled(rename(wide, Community = community_id), escape = FALSE, full_width = TRUE, font_size = 12) |>
+          scroll_box(height = "400px"))
+  aic |> filter(best) |> count(`Best model` = model_id, name = "Communities") |> kable_styled() |> print()
+}
+```
+
+## Goodness of Fit
+
+For each fitted community, simulated networks from the model are compared with the observed network on in-degree, out-degree, shared partners, geodesic distance and the model terms. The table shows the share of communities where at least one category of that statistic fits poorly (MC p < `r GOF_P`). The per-category values are in `ergm_gof.csv`.
+
+```{r ergm-gof, results = "asis"}
+gof_summary_table(E, "Share of communities with poor fit, by GOF statistic")
+```
+
+Each community's GOF plots are in **By Community** (boxes = networks simulated from the fitted model; line = observed network; good fit = the line stays inside the boxes). `GOF_IMAGE_MODELS` at the top of this file chooses which models' plots are embedded.
+
+## Collinearity Flags
+
+Coefficient pairs whose estimates are correlated at |r| ≥ `r CORR_THRESHOLD` (from each fit's covariance matrix). The model cannot cleanly separate those two effects in that community; treat both coefficients with caution.
+
+```{r ergm-corr, results = "asis"}
+cf <- corr_flags(E)
+if (nrow(cf)) {
+  cf |> count(Model = model_id, `Term 1` = clean_term(term1), `Term 2` = clean_term(term2), name = "Communities") |>
+    arrange(desc(Communities)) |> kable_styled(caption = "Flagged pairs (number of communities)") |> print()
+} else cat("*No coefficient pairs at or above the threshold.*\n")
+```
+
+## Robustness Across Specifications
+
+How stable is each term's estimate as models grow? Each line follows one community across the models that contain the term (usable fits only).
+
+```{r ergm-robustness, fig.height = 7}
+if (!is.null(E$coefs)) {
+  rob <- E$coefs |> filter(!problem, is.finite(std.error)) |>
+    group_by(term) |> filter(n_distinct(model_id) >= 2) |> ungroup() |>
+    mutate(model = factor(model_id, levels = ergm_defs$model_id), term = clean_term(term, 35))
+  if (nrow(rob)) {
+    ggplot(rob, aes(model, estimate, group = community_id)) +
+      geom_hline(yintercept = 0, linetype = "dashed", colour = "grey50") +
+      geom_line(alpha = 0.3, colour = "#2a6db0") + geom_point(size = 1, alpha = 0.6, colour = "#2a6db0") +
+      facet_wrap(~ term, scales = "free_y") +
+      labs(x = "Model", y = "Estimate (log-odds)") + theme_minimal(base_size = 10)
+  }
+}
+```
+
+---
+
+# 3. STERGMs — Directed Network Change Between Waves {.tabset}
+
+```{r stergm-toggles}
+toggle_panel("stergm", stergm_defs$model_id, stergm_defs$label, "Show STERGM models:")
+```
+
+<div class="note">
+Separable temporal ERGMs (CMLE) model arc **formation** and **dissolution** between waves 1 and 2 as separate sub-models, with wave 1 covariates. **Formation: estimate > 0 = a new arc is more likely to form. Dissolution: tergm ≥ 4.0 estimates this sub-model as persistence (`Persist()` terms), so estimate > 0 = an existing arc is more likely to persist (less likely to dissolve), and < 0 = more likely to dissolve.** Models with a blank formation or dissolution formula in `config/stergm_model_desc.csv` are one-sided build-up steps and only appear in that sub-model's tables. Pooling and trust checks are run separately for each sub-model.
+</div>
+
+## Formation — Pooled
+
+```{r stergm-form-pooled}
+if (nrow(S$meta)) pooled_table(S, "stergm", stergm_ids("formation"), stergm_labels, "formation",
+                               "Pooled formation estimates across communities") else cat("No STERGM results yet.")
+```
+
+## Dissolution (Persistence) — Pooled
+
+```{r stergm-diss-pooled}
+if (nrow(S$meta)) pooled_table(S, "stergm", stergm_ids("dissolution"), stergm_labels, "dissolution",
+                               "Pooled persistence estimates across communities (> 0 = arc more likely to persist)")
+```
+
+```{r stergm-metareg, results = "asis"}
+if (nrow(S$meta_reg)) {
+  cat("### Do community characteristics explain the differences?\n\n")
+  S$meta_reg |> filter(coefficient != "intrcpt") |>
+    transmute(Model = model_id, Part = part, Term = clean_term(term), Moderator = coefficient, Estimate = fmt_num(estimate),
+              SE = fmt_num(std.error), p = fmt_p(p.value), `R² (%)` = fmt_num(R2, 0), k) |>
+    kable_styled() |> print()
+}
+```
+
+## Can the Pooled Results Be Trusted?
+
+Same checks as for the ERGMs (see the ERGM section), applied to each sub-model separately. 
+
+```{r stergm-trust-form}
+if (nrow(S$trust)) trust_table(S, "stergm", stergm_ids("formation"), stergm_labels, "formation", "Trust verdict: formation")
+```
+
+```{r stergm-trust-diss}
+if (nrow(S$trust)) trust_table(S, "stergm", stergm_ids("dissolution"), stergm_labels, "dissolution", "Trust verdict: dissolution (persistence)")
+```
+
+```{r stergm-selection}
+if (nrow(S$selection)) {
+  S$selection |>
+    transmute(Model = model_id, Part = part, Pooled = n_used, Of = n_total, `Median n (pooled)` = median_n_used,
+              `Median n (others)` = median_n_other, `Size differs p` = fmt_p(size_p),
+              `Density differs p` = fmt_p(density_p), `Ideation prev. differs p` = fmt_p(ideation_p)) |>
+    kable_styled(caption = "Do pooled communities differ from the rest?")
+}
+```
+
+### Details by Model {.tabset}
+
+```{r stergm-trust-details, results = "asis", fig.height = 8}
+if (nrow(S$trust)) {
+  for (p in c("formation", "dissolution")) {
+    ids <- stergm_ids(p)
+    sub <- setNames(paste0(stergm_labels[ids], " — ", p), ids)
+    trust_details(S, ids, sub, p, "####")
+  }
+}
+```
+
+## Fit & Convergence
+
+```{r stergm-status}
+fit_status_table(S, "Fit status by model and sub-model (communities)")
+```
+
+```{r stergm-events}
+if (!is.null(S$info)) {
+  S$info |> distinct(model_id, community_id, n_formed, n_dissolved) |>
+    group_by(Model = model_id) |>
+    summarise(`Median arcs formed` = median(n_formed, na.rm = TRUE), `Median arcs dissolved` = median(n_dissolved, na.rm = TRUE),
+              `Fewest formed` = min(n_formed, na.rm = TRUE), `Fewest dissolved` = min(n_dissolved, na.rm = TRUE), .groups = "drop") |>
+    kable_styled(caption = "Formation and dissolution events per community (shared nodes, wave 1 -> wave 2)")
+}
+```
+
+## Goodness of Fit
+
+```{r stergm-gof, results = "asis"}
+gof_summary_table(S, "Share of communities with poor fit, by GOF statistic")
+```
+
+Each community's GOF plots are in **By Community**.
+
+## Collinearity Flags
+
+```{r stergm-corr, results = "asis"}
+cf <- corr_flags(S)
+if (nrow(cf)) {
+  cf |> count(Model = model_id, `Term 1` = clean_term(term1), `Term 2` = clean_term(term2), name = "Communities") |>
+    arrange(desc(Communities)) |> kable_styled(caption = "Flagged pairs (number of communities)") |> print()
+} else cat("*No coefficient pairs at or above the threshold.*\n")
+```
+
+
+---
+
+# References
+
+- An, W. (2015). Multilevel meta network analysis with application to studying network dynamics of network interventions. *Social Networks*, 43, 48–56.
+- Krivitsky, P. N., Coletti, P., & Hens, N. (2023). A tale of two datasets: Representativeness and generalisability of inference for samples of networks. *Journal of the American Statistical Association*.
+- Snijders, T. A. B. (2002). Markov chain Monte Carlo estimation of exponential random graph models. *Journal of Social Structure*, 3(2).
+- Snijders, T. A. B., & Baerveldt, C. (2003). A multilevel network study of the effects of delinquent behavior on friendship evolution. *Journal of Mathematical Sociology*, 27, 123–151.
+- Tolochko, P., & Boomgaarden, H. G. (2024). Same but different: A comparison of estimation approaches for exponential random graph models for multiple networks. *Social Networks*, 76, 1–11.
+
+# Session Info
+
+```{r session-info, echo = TRUE}
+sessionInfo()
+```

@@ -1,0 +1,21 @@
+term,label
+edges,Edges
+nodematch.ideation_binary_w1,Ideation status homophily
+nodeicov.ideation_binary_w1,Ideation: receiver
+nodeocov.ideation_binary_w1,Ideation: sender
+mutual,Reciprocity
+gwideg.fixed.0.5,GW in-degree (decay=0.5)
+gwodeg.fixed.0.5,GW out-degree (decay=0.5)
+gwesp.OSP.fixed.0.25,"GW shared partners, OSP (decay=0.25)"
+gwesp.ISP.fixed.0.25,"GW shared partners, ISP (decay=0.25)"
+gwdsp.OSP.fixed.0.25,"GW dyadwise shared partners, OSP (decay=0.25)"
+gwdsp.ISP.fixed.0.25,"GW dyadwise shared partners, ISP (decay=0.25)"
+edgecov.shared_club,Shared club membership
+nodematch.gender,Same gender
+nodematch.grade_w1,Same grade
+nodeicov.cesd_w1,Depressive symptoms: receiver
+nodeocov.cesd_w1,Depressive symptoms: sender
+nodeicov.cesd_w1_2,Depressive symptoms squared: receiver
+nodeocov.cesd_w1_2,Depressive symptoms squared: sender
+nodeicov.social_support_w1,Social support: receiver
+nodeocov.social_support_w1,Social support: sender

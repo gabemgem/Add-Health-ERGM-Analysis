@@ -1,0 +1,32 @@
+Term,Model 1,Model 2,Model 3,Model 4
+Edges,"-7.60***
+[-7.87, -7.34]",n/e,n/e,"-8.50***
+[-9.30, -7.71]"
+Ideation status homophily,"-0.15
+[-0.41, 0.12]",n/e,n/e,"-0.81***
+[-1.11, -0.52]"
+Ideation: receiver,"-0.11
+[-0.38, 0.15]",n/e,n/e,"4.34***
+[4.05, 4.64]"
+Ideation: sender,"-0.32*
+[-0.58, -0.05]",n/e,n/e,"4.90***
+[4.58, 5.21]"
+Reciprocity,—,n/e,n/e,"7.68***
+[7.13, 8.22]"
+Shared club membership,—,n/e,n/e,"7.17***
+[6.93, 7.41]"
+Same gender,—,n/e,n/e,"-3.74***
+[-3.88, -3.60]"
+Depressive symptoms: receiver,—,—,n/e,"-0.01
+[-0.03, 0.02]"
+Depressive symptoms: sender,—,—,n/e,"-0.81***
+[-0.84, -0.78]"
+Social support: receiver,—,—,n/e,"-0.25***
+[-0.36, -0.15]"
+Social support: sender,—,—,n/e,"2.38***
+[2.26, 2.51]"
+Depressive symptoms squared: receiver,—,—,—,"0.00***
+[0.00, 0.00]"
+Depressive symptoms squared: sender,—,—,—,"0.02***
+[0.02, 0.02]"
+Estimation status,Usable,degenerate,degenerate,Usable
